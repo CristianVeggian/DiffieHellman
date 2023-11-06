@@ -1,5 +1,6 @@
 import socket
 import threading
+import re
 
 client_list = {}
 
@@ -18,24 +19,35 @@ def handle_messages(socket, endereco, nick):
 
         msg_decoded = msg.decode()
 
-        print(f"Received message from {username}")
+        match = re.match(r"\[type:(\w+),dest:(\w+)(?:,name:(\w+\.\w+))?(?:,hash:(\w+))?,body:(.*?)\]", msg_decoded)
 
-        # Mensagens de Broadcast:
-        if "\\broadcast " in msg_decoded:
-            for chat_user in client_list.keys():
-                if chat_user != nick:
-                    cli_conn: socket.socket = client_list[chat_user][0]
-                    try:
-                        cli_conn.sendall(msg_decoded.encode())
-                    except OSError:
-                        pass
-        elif "\\p " in msg_decoded:
-            msg_decoded = msg_decoded[3:]
-            destination = msg_decoded[:msg_decoded.index(" ")]
-            msg_decoded = msg_decoded[msg_decoded.index(destination):]
-            cli_conn: socket.socket = client_list[destination]
+        type_value = match.group(1)
+        dest_value = match.group(2)
+        name_value = match.group(3)
+        hash_value = match.group(4)
+        body_value = match.group(5)
+
+        print(msg_decoded)
+        
+        if type_value == 'text':
+            msg = f'[type:text,orig:{nick},body:{body_value}]'
+            cli_conn: socket.socket = client_list[dest_value]
             try:
-                cli_conn.send(msg_decoded.encode())
+                cli_conn.send(msg.encode())
+            except OSError:
+                pass
+        elif type_value == 'file':
+            msg = f'[type:file,orig:{nick},name:{name_value},hash:{hash_value},body:{body_value}]'
+            cli_conn: socket.socket = client_list[dest_value]
+            try:
+                cli_conn.send(msg.encode())
+            except OSError:
+                pass
+        elif type_value == 'par' or type_value == 'rpar':
+            msg = f'[type:{type_value},orig:{nick},body:{body_value}]'
+            cli_conn: socket.socket = client_list[dest_value]
+            try:
+                cli_conn.send(msg.encode())
             except OSError:
                 pass
 
@@ -66,20 +78,16 @@ while True:
     # Recebe dados do cliente
     data = client_socket.recv(1024)
     
-    dados = data.decode()
-
-    key = dados[dados.index("-----BEGIN PUBLIC KEY-----"):dados.index("-----END PUBLIC KEY-----")]
-
-    nick = dados[dados.index("-----END PUBLIC KEY-----")+25:]
-
+    nick = data.decode()
+    
     print(f"Novo cliente conectado: {nick}")
 
-    client_list[nick] = (client_socket, key)
+    client_list[nick] = client_socket
 
-    client_socket.send("[CONECTADO]".encode())
+    client_socket.send("Conectado ao chat".encode())
 
     # Inicia a thread que vai receber as msgs dos clientes
-    msg_thread = threading.Thread(target=handle_messages, args=(client_socket, client_address, data.decode(),), daemon=True)
+    msg_thread = threading.Thread(target=handle_messages, args=(client_socket, client_address, nick,), daemon=True)
     msg_thread.start()
 
 # Fecha a conexão com o cliente e o servidor
